@@ -9,6 +9,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import CheckIcon from '@mui/icons-material/Check';
 import RestoreFromTrashIcon from '@mui/icons-material/RestoreFromTrash';
 import { lighten } from '@mui/material/styles';
+import axios from 'axios';
 
 const LabelSetting = () => {
     return(
@@ -24,30 +25,41 @@ const LabelSetting = () => {
 export default LabelSetting;
 
 const Main = () => {
+    const searchTextRef = React.useRef("");
+    const [searchValue, setSearchValue] = React.useState("");
+
+    const handleReset = () => {
+        searchValue.current.value = "";
+    };
+
+    const handleSearch = () => {
+        setSearchValue(searchTextRef.current.value);
+    };
+
     return(
         <>
             <Box /*sx={{bgcolor: "#ffe8fc"}}*/>
                 <Container maxWidth="xl" /*sx={{bgcolor: "#cfe8fc"}}*/>
                     <Typography sx={{mt: 5, mb: 3}} variant="h3">라벨 설정</Typography>
                     <Paper elevation={3} sx={{p: 2, display: "flex", justifyContent: "space-between"}}>
-                        <TextField label="라벨 코드 / 라벨 명" variant="outlined" sx={{width: "45%"}}/>
+                        <TextField inputRef={searchTextRef} label="라벨 코드 / 라벨 명" variant="outlined" sx={{width: "45%"}}/>
                         <Box sx={{display: "flex", alignSelf: "center"}}>
-                            <Button variant="contained" color="error" endIcon={<ClearIcon />} sx={{mr: 1}}>초기화</Button>
-                            <Button variant="contained" endIcon={<SearchIcon />}>검색</Button>
+                            <Button onClick={()=>handleReset()} variant="contained" color="error" endIcon={<ClearIcon />} sx={{mr: 1}}>초기화</Button>
+                            <Button onClick={()=>handleSearch()} variant="contained" endIcon={<SearchIcon />}>검색</Button>
                         </Box>
                     </Paper>
                 </Container>
             </Box>
             <Box sx={{mt: 5}}>
                 <Container maxWidth="xl" /*sx={{bgcolor: "#cfe8fc"}}*/>
-                    <LabelGrid/>
+                    <LabelGrid search={searchValue}/>
                 </Container>
             </Box>
         </>
     );
 };
 
-const LabelGrid = () =>{
+const LabelGrid = ({search}) =>{
     // Label Code Grid
     const [labelCodeRows, setLabelCodeRows] = React.useState([]);
     const [labelCodeNewRowCount, setLabelCodeNewRowCount] = React.useState(1);
@@ -174,6 +186,17 @@ const LabelGrid = () =>{
         );
     };
 
+    (function(){
+        let url = "http://localhost:8080/dotudy/system/labels";
+        let header = {"Content-type":"application/json"};
+        let crossOriginIsolated = {withCredentials: true};
+        let data = {}
+        axios.get(url, header, data, crossOriginIsolated)
+        .then((response)=>{
+            console.log(response);
+        }).catch((error)=>{console.log(error)});
+    })();
+
     return(
         <Stack
             sx={{
@@ -262,10 +285,6 @@ const LabelGrid = () =>{
                             classStatus = "delete";
                         }
                         return `status-color--${classStatus}`
-                    }}
-                    selectionModel={selectionModel}
-                    onSelectionModelChange={(newSelectionModel) => {
-                        setSelectionModel(newSelectionModel);
                     }}
                 />
             </Box>
