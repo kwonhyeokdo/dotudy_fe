@@ -1,0 +1,499 @@
+import { arrayRemove, isEmpty, jsonCopy, toServer } from 'utils/common';
+import React, { forwardRef, useEffect, useImperativeHandle } from 'react';
+import Header from '../../layout/element/Header';
+import { Box, Button, Container, Paper, Stack, TextField, Typography} from '@mui/material';
+import { DataGrid, GridActionsCellItem, GridToolbarContainer } from '@mui/x-data-grid';
+import SearchIcon from '@mui/icons-material/Search';
+import ClearIcon from '@mui/icons-material/Clear';
+import AddIcon from '@mui/icons-material/Add';
+import DeleteIcon from '@mui/icons-material/Delete';
+import CheckIcon from '@mui/icons-material/Check';
+import RestoreFromTrashIcon from '@mui/icons-material/RestoreFromTrash';
+import { lighten } from '@mui/material/styles';
+import { AlertPopup } from 'components/AlertPopup';
+
+export const LabelSetting = () => {
+    return(
+        <Stack>
+            <Header/>
+            <Main/>
+        </Stack>
+    );
+};
+
+const Main = () => {
+    const mainRefs = {
+        search: React.useRef(),
+        labelCode: React.useRef()
+    };
+
+    useEffect(()=>{
+        mainRefs.labelCode.current.searchLabelCode();
+    }, [mainRefs.search, mainRefs.labelCode]);
+
+    return(
+        <Stack sx={{width: "100vw"}}>
+            <Search ref={mainRefs}/>
+            <LabelCode ref={mainRefs}/>
+            <LabelName/>
+
+        </Stack>
+    );
+};
+
+const Search = forwardRef((props, mainRefs) => {
+    const labelCodeRef = React.useRef();
+
+    useImperativeHandle(mainRefs.search, () => ({
+        labelCode: labelCodeRef
+    }));
+
+    const initBtn = () => {
+        console.log(mainRefs);
+        //labelCodeRef.current.value = "";
+    };
+
+    const serachBtn = () => {
+        searchLabelCode();
+    };
+
+    const searchEnterKey = (e) => {
+        if(e.key === "Enter"){
+            searchLabelCode();
+            return;
+        }
+    };
+
+    const searchLabelCode = () => {
+        mainRefs.labelCode.current.searchLabelCode();
+    };
+
+    return(
+        <Box sx={{width: "100%", mb: 5 /*bgcolor: "#ffe8fc"*/}}>
+            <Container maxWidth="xl" /*sx={{bgcolor: "#cfe8fc"}}*/>
+                <Typography sx={{mt: 5, mb: 3}} variant="h4">라벨 설정</Typography>
+                <Paper elevation={3} sx={{p: 2, display: "flex", justifyContent: "space-between"}}>
+                    <TextField onKeyDown={(e)=>{searchEnterKey(e)}} inputRef={labelCodeRef} label="라벨 코드 / 라벨 명" variant="outlined" sx={{width: "45%"}}/>
+                    <Box sx={{display: "flex", alignSelf: "center"}}>
+                        <Button onClick={()=>{initBtn()}} variant="contained" color="error" endIcon={<ClearIcon />} sx={{mr: 1}}>초기화</Button>
+                        <Button onClick={()=>{serachBtn()}} variant="contained" endIcon={<SearchIcon />}>검색</Button>
+                    </Box>
+                </Paper>
+            </Container>
+        </Box>
+    );
+});
+
+const LabelCode = forwardRef((props, mainRefs) => {
+    const [rows, setRows] = React.useState([]);
+    const [selectionModel, setSelectionModel] = React.useState([]);
+    const [newRowId, setNewRowId] = React.useState(1);
+    const [alertDialog, setAlertDialog] = React.useState({open: false});
+
+    useImperativeHandle(mainRefs.labelCode, () => ({
+        searchLabelCode: ()=>{
+            const labelCode = mainRefs.search.current.labelCode.current.value;
+            let url = "/system/labelCode";
+            if(!isEmpty(labelCode)){
+                url += "?labelCode=" + labelCode;
+            }
+            toServer({
+                url: url,
+                method: "GET"
+            }).then((reseponse)=>{
+                setRows(reseponse.data);
+            });
+        }
+    }));
+
+    const addBtn = () => {
+        const newId = "new" + newRowId;
+        const newRow = {
+             labelId: newId
+            ,labelCode: null
+            ,modifyUserId: "혁도"
+            ,modifyDateTime: null
+            ,status: "new"
+        };
+        setRows([...rows, newRow]);
+        setSelectionModel([...selectionModel, newId]);
+        setNewRowId(newRowId + 1);
+    };
+
+    const handleRestore = (gridRowParams, rowStateObj) => {
+        rowStateObj.setRows(rowStateObj.rows.map((row) => {
+            if(row[gridRowParams.idField] === gridRowParams.id){
+                const restoreRow = JSON.parse(JSON.stringify(row));
+                if(isEmpty(restoreRow["origin"])){
+                    if(restoreRow[gridRowParams.idField].startsWith("new")){
+                        restoreRow["status"] = "new";
+                    }else{
+                        restoreRow["status"] = "normal";
+                        if(selectionModel.includes(restoreRow[gridRowParams.idField])){
+                            let selected = jsonCopy(selectionModel);
+                            selected = arrayRemove(selected, restoreRow[gridRowParams.idField]);
+                            setSelectionModel(selected);
+                        }
+                    }
+                }else{
+                    restoreRow["status"] = "edit";
+                }
+                return restoreRow;
+            }
+            else{
+                return row;
+            }
+        }));
+    };
+
+    const handleDelete = (gridRowParams, rowStateObj) => {
+        rowStateObj.setRows(rowStateObj.rows.map((row) => {
+            if(row[gridRowParams.idField] === gridRowParams.id){
+                const removeRow = JSON.parse(JSON.stringify(row));
+                removeRow.status = "delete";
+                if(!selectionModel.includes(removeRow[gridRowParams.idField])){
+                    const selected = jsonCopy(selectionModel);
+                    selected.push(removeRow[gridRowParams.idField]);
+                    setSelectionModel(selected);
+                }
+                return removeRow;
+            }
+            else{
+                return row;
+            }
+        }));
+    };
+
+    const saveBtn = () => {
+        if(selectionModel.length === 0){
+            setAlertDialog({
+                open: true,
+                state: "info",
+                text: "선택된 항목이 없습니다.",
+                buttons: [{text: "닫기"}]
+            });
+            return;
+        }
+
+        const sendData = {
+            insert: [],
+            update: [],
+            delete: []
+        };
+        
+        selectionModel.forEach((rowId)=>{
+            for(const row of rows){
+                if(row["labelId"] === rowId && row["status"] !== "normal"){
+                    switch(row["status"]){
+                        case "new":
+                            sendData.insert.push(row);
+                            break;
+                        case "edit":
+                            sendData.update.push(row)
+                            break;
+                        case "delete":
+                            if(!rowId.startsWith("new")){
+                                sendData.delete.push(row)
+                            }
+                            break;
+                        default:
+                            continue;
+                    }
+                    break;
+                }
+            }
+        });
+
+        if(sendData.insert.length === 0 && sendData.delete.length === 0 && sendData.update.length === 0){
+            setAlertDialog({
+                open: true,
+                state: "info",
+                text: "변경된 항목이 없습니다.",
+                buttons: [{text: "닫기"}]
+            });
+            return;
+        }
+
+        toServer({
+            url: "/system/labelCode",
+            method: "POST",
+            data: sendData
+        }).then((reseponse)=>{
+            if(reseponse){
+                mainRefs.labelCode.current.searchLabelCode();
+                setSelectionModel([]);
+            }
+        });
+    };
+
+    const rowUpdate = (newRow, oldRow, idField) => {
+        let keys = Object.keys(newRow);
+        keys = arrayRemove(keys, ["status", "origin"]);
+        if(newRow["status"] === "normal"){
+            let isChange = false;
+            for(const key of keys){
+                if(newRow[key] !== oldRow[key]){
+                    isChange = true;
+                    break;
+                }
+            }
+
+            if(isChange){
+                newRow["status"] = "edit";
+                const origin = jsonCopy(oldRow);
+                newRow["origin"] = origin;
+                if(!selectionModel.includes(newRow[idField])){
+                    const selected = jsonCopy(selectionModel);
+                    selected.push(newRow[idField]);
+                    setSelectionModel(selected);
+                }
+            }
+        }else if(newRow["status"] === "edit"){
+            let isChange = false;
+            for(const key of keys){
+                if(newRow[key] !== oldRow[key]){
+                    isChange = true;
+                    break;
+                }
+            }
+
+            if(isChange){
+                let isOrigin = true;
+                const origin = oldRow["origin"];
+                for(const key of keys){
+                    if(newRow[key] !== origin[key]){
+                        isOrigin = false;
+                        break;
+                    }
+                }
+
+                if(isOrigin){
+                    if(newRow["status"] === "edit"){
+                        newRow["status"] = "normal";
+                        delete newRow["origin"];
+                        if(selectionModel.includes(newRow[idField])){
+                            let selected = jsonCopy(selectionModel);
+                            selected = arrayRemove(selected, newRow[idField]);
+                            setSelectionModel(selected);
+                        }
+                    }
+                }else{
+                    if(!selectionModel.includes(newRow[idField])){
+                        const selected = jsonCopy(selectionModel);
+                        selected.push(newRow[idField]);
+                        setSelectionModel(selected);
+                    }
+                }
+            }
+        }else if(newRow["status"] === "delete"){
+            let isChange = false;
+            for(const key of keys){
+                if(newRow[key] !== oldRow[key]){
+                    isChange = true;
+                    break;
+                }
+            }
+
+            if(isChange){
+                if(isEmpty(newRow["origin"])){
+                    if(!newRow[idField].startsWith("new")){
+                        const origin = jsonCopy(oldRow);
+                        origin["status"] = "normal";
+                        newRow["origin"] = origin;
+                    }
+                }else{
+                    let isOrigin = true;
+                    const origin = oldRow["origin"];
+                    for(const key of keys){
+                        if(newRow[key] !== origin[key]){
+                            isOrigin = false;
+                            break;
+                        }
+                    }
+
+                    if(isOrigin){
+                        delete newRow["origin"];
+                    }
+                }
+                if(!selectionModel.includes(newRow[idField])){
+                    const selected = jsonCopy(selectionModel);
+                    selected.push(newRow[idField]);
+                    setSelectionModel(selected);
+                }
+            }
+        }
+        setRows(rows.map((row) => (row[idField] === newRow[idField]) ? newRow : row));
+        return newRow;
+    };
+
+    const deleteRender = (gridRowParams, rowStateObj) => {
+        let row = null;
+        let result = [];
+        for(let r of rowStateObj.rows){
+            if(r[gridRowParams.idField] === gridRowParams.id){
+                row = r;
+                break;
+            }
+        }
+        
+        if(row !== null){
+            if(row.status.startsWith("delete")){
+                result.push(
+                    <GridActionsCellItem
+                      icon={<RestoreFromTrashIcon />}
+                      label="Restore"
+                      onClick={()=>handleRestore(gridRowParams, rowStateObj)}
+                    />
+                );
+            }else{
+                result.push(
+                    <GridActionsCellItem
+                      icon={<DeleteIcon />}
+                      label="Delete"
+                      onClick={()=>handleDelete(gridRowParams, rowStateObj)}
+                    />
+                );
+            }
+        }
+        
+        return result;
+    };
+
+    const ToolBar = () => {
+        return(
+            <GridToolbarContainer>
+                <Box sx={{p: 1, width: "100%", display: "flex", justifyContent: "space-between", alignSelf: "center"}}>
+                    <Typography variant="h5">라벨 코드</Typography>
+                    <Box sx={{display: "flex", justifyContent: "flex-end"}}>
+                        <Button onClick={()=>addBtn()} variant="outlined" endIcon={<AddIcon />} sx={{mr: 1}}>추가</Button>
+                        <Button onClick={()=>saveBtn()} variant="outlined" endIcon={<CheckIcon />}>저장</Button>
+                    </Box>
+                </Box>
+            </GridToolbarContainer>
+        );
+    };
+
+    return(
+        <Box sx={{width: "100%" /*bgcolor: "#ffe8fc"*/}}>
+            <AlertPopup set={alertDialog}/>
+            <Container maxWidth="xl" /*sx={{bgcolor: "#cfe8fc"}}*/
+                sx={{
+                    '& .status-color--delete': {
+                        bgcolor: (theme) => lighten(theme.palette.error.main, 0.7) + "!important",
+                        '&:hover': {
+                            bgcolor: (theme) => lighten(theme.palette.error.main, 0.6) + "!important"
+                        }
+                    },
+                    '& .status-color--edit': {
+                        bgcolor: (theme) => lighten(theme.palette.success.main, 0.7) + "!important",
+                        '&:hover': {
+                            bgcolor: (theme) => lighten(theme.palette.success.main, 0.6) + "!important"
+                        }
+                    },
+                    '& .status-color--new': {
+                        bgcolor: (theme) => lighten(theme.palette.primary.main, 0.7) + "!important",
+                        '&:hover': {
+                            bgcolor: (theme) => lighten(theme.palette.primary.main, 0.6) + "!important"
+                        }
+                    },
+                }}
+            >
+                <Box sx={{height: 400}}>
+                    <DataGrid
+                        rows={rows}
+                        getRowId={(row) => row.labelId}
+                        initialState={{
+                            columns: {
+                                columnVisibilityModel: {
+                                    labelId: false,
+                                    status: false
+                                }
+                            }
+                          }}
+                        columns={[
+                             { field: "labelId", headerName: "라벨ID"}
+                            ,{ field: "labelCode", headerName: "라벨코드", flex: 4, editable: true}
+                            ,{ field: "modifyUserId", headerName: "수정자", flex: 2}
+                            ,{ field: "modifyDateTime", headerName: "수정날짜", flex: 2}
+                            ,{ field: "status", headerName: "상태"}
+                            ,{ field: "actions", type: "actions", headerName: "삭제", width: 10, cellClassName: "actions" ,getActions: (gridRowParams) => deleteRender({...gridRowParams, idField: "labelId"}, {rows: rows, setRows: setRows}) }
+                        ]}
+                        components={{
+                            Toolbar: ToolBar
+                        }}
+                        checkboxSelection
+                        disableSelectionOnClick
+                        experimentalFeatures={{ newEditingApi: true }}
+                        getRowClassName={(params) => {
+                            let classStatus = params.row.status;
+                            if(classStatus.startsWith("delete")){
+                                classStatus = "delete";
+                            }
+                            return `status-color--${classStatus}`
+                        }}
+                        processRowUpdate={(newRow, oldRow)=>rowUpdate(newRow, oldRow, "labelId")}
+                        selectionModel={selectionModel}
+                        onSelectionModelChange={(newSelectionModel) => {
+                            setSelectionModel(newSelectionModel);
+                        }}
+                    />
+                </Box>
+            </Container>
+        </Box>
+    );
+});
+
+const LabelName = () => {
+    const [rows, setRows] = React.useState([]);
+
+    const ToolBar = () => {
+        return(
+            <GridToolbarContainer>
+                <Box sx={{p: 1, width: "100%", display: "flex", justifyContent: "space-between", alignSelf: "center"}}>
+                    <Typography variant="h5">라벨명</Typography>
+                    <Box sx={{display: "flex", justifyContent: "flex-end"}}>
+                        <Button variant="outlined" endIcon={<CheckIcon />}>저장</Button>
+                    </Box>
+                </Box>
+            </GridToolbarContainer>
+        );
+    };
+
+    return(
+        <Box sx={{width: "100%" /*bgcolor: "#ffe8fc"*/}}>
+            <Container maxWidth="xl" /*sx={{bgcolor: "#cfe8fc"}}*/
+                
+            >
+                <Box sx={{height: 400}}>
+                    <DataGrid
+                        rows={rows}
+                        getRowId={(row) => row.labelId}
+                        initialState={{
+                            columns: {
+                                columnVisibilityModel: {
+                                    labelId: false,
+                                    status: false
+                                }
+                            }
+                            }}
+                        columns={[
+                             { field: "labelId", headerName: "라벨ID"}
+                            ,{ field: "labelCode", headerName: "라벨코드", flex: 2, editable: true}
+                            ,{ field: "language", headerName: "언어", flex: 1}
+                            ,{ field: "labelName", headerName: "라벨명", flex: 4}
+                            ,{ field: "modifyUserId", headerName: "수정자", flex: 2}
+                            ,{ field: "modifyDateTime", headerName: "수정날짜", flex: 2}
+                            ,{ field: "status", headerName: "상태"}
+                        ]}
+                        checkboxSelection
+                        disableSelectionOnClick
+                        experimentalFeatures={{ newEditingApi: true }}
+                        components={{
+                            Toolbar: ToolBar
+                        }}
+                    />
+                </Box>
+            </Container>
+        </Box>
+    );
+};
